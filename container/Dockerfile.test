@@ -22,6 +22,9 @@ ENV PKG_CONFIG_PATH="/app/vendor/vips/lib/pkgconfig:$PKG_CONFIG_PATH"
 ENV CPPPATH="/app/vendor/vips/include:$CPPPATH"
 ENV CPATH="/app/vendor/vips/include:$CPATH"
 
+# Verify all shared library dependencies resolve (catches missing runtime libs)
+RUN ldd /app/vendor/vips/lib/libvips.so | grep "not found" && exit 1 || true
+
 # Verify vips works and ruby-vips can link to it
 RUN vips --version && \
     ruby -e 'require "vips"; puts "Success: ruby-vips linked to #{Vips::LIBRARY_VERSION}"'
