@@ -1,0 +1,19 @@
+# syntax=docker/dockerfile:1
+FROM scalingo/scalingo-24:latest
+USER root
+
+# Copy the built tarball
+COPY build/scalingo.tar.gz /tmp/vips.tar.gz
+
+# Vendor it exactly like the buildpack does
+RUN mkdir -p /app/vendor/vips && tar -xz -f /tmp/vips.tar.gz -C /app/vendor/vips
+
+# Setup runtime environment
+ENV PATH="/app/vendor/vips/bin:$PATH"
+ENV LD_LIBRARY_PATH="/app/vendor/vips/lib:$LD_LIBRARY_PATH"
+
+# Sanity check + Ruby test
+RUN vips --version && \
+    apt-get update && apt-get install -y ruby-dev && \
+    gem install ruby-vips && \
+    ruby -e 'require "vips"; puts "✓ Success: ruby-vips linked to #{Vips::LIBRARY_VERSION}"'

@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -e
+
+BUILD_DIR=$1
+CACHE_DIR=$2
+BUILDPACK_NAME=vips
+BIN_DIR=$(cd "$(dirname "$0")"; pwd)
+ROOT_DIR=$(dirname "$BIN_DIR")
+
+indent() { sed -u 's/^/       /'; }
+arrow() { sed -u 's/^/-----> /'; }
+
+echo "Vendoring libvips binaries" | arrow
+
+# We look for scalingo.tar.gz specifically
+TARBALL="${ROOT_DIR}/build/scalingo.tar.gz"
+VENDOR_DEST="$BUILD_DIR/vendor/vips"
+APP_VIPS="/app/vendor/vips"
+
+if [ ! -f "$TARBALL" ]; then
+  echo "Error: Tarball not found at $TARBALL" | indent
+  exit 1
+fi
+
+mkdir -p "$VENDOR_DEST"
+tar -xz -f "$TARBALL" -C "$VENDOR_DEST" | indent
+
+echo "Configuring environment" | arrow
+
+# Runtime setup via .profile.d
+mkdir -p "$BUILD_DIR/.profile.d"
+cat <<EOF > "$BUILD_DIR/.profile.d/$BUILDPACK_NAME.sh"
+export PATH="$APP_VIPS/bin:\$PATH"
+export LD_LIBRARY_PATH="\$LD_LIBRARY_PATH:$APP_VIPS/lib"
+export LIBRARY_PATH="\$LIBRARY_PATH:$APP_VIPS/lib"
+export PKG_CONFIG_PATH="\$PKG_CONFIG_PATH:$APP_VIPS/lib/pkgconfig"
+export CPPPATH="\$CPPPATH:$APP_VIPS/include"
+export CPATH="\$CPATH:$APP_VIPS/include"
+EOF
+
+# Build-time setup for subsequent buildpacks (like Ruby/Python)
+export PATH="$VENDOR_DEST/bin:$PATH"
+export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$VENDOR_DEST/lib"
+export PKG_CONFIG_PATH="$PKG_CONFIG_PATH:$VENDOR_DEST/lib/pkgconfig"
+
+echo "libvips $(vips --vips-version) successfully installed" | indent
