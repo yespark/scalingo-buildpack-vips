@@ -1,11 +1,13 @@
 # syntax=docker/dockerfile:1
 FROM scalingo/scalingo-24:latest
 
-# Install test dependencies as root (these won't be available in production,
-# but are needed to verify the shared library linking works)
+# Install ruby-dev as root (needed for native extension compilation)
 USER root
-RUN apt-get update && apt-get install -y --no-install-recommends ruby-dev && \
-    gem install ruby-vips
+RUN mkdir -p /var/log/apt /var/log && \
+    apt-get update && apt-get install -y --no-install-recommends \
+      ruby-dev \
+      libpoppler-glib8 \
+      liborc-0.4-0
 
 # Switch to appsdeck to match the real Scalingo runtime environment
 USER appsdeck
@@ -16,15 +18,22 @@ RUN mkdir -p /app/vendor/vips && tar -xz -f /tmp/vips.tar.gz -C /app/vendor/vips
 
 # Set the same environment variables that bin/compile generates via .profile.d/vips.sh
 ENV PATH="/app/vendor/vips/bin:$PATH"
-ENV LD_LIBRARY_PATH="/app/vendor/vips/lib:$LD_LIBRARY_PATH"
-ENV LIBRARY_PATH="/app/vendor/vips/lib:$LIBRARY_PATH"
-ENV PKG_CONFIG_PATH="/app/vendor/vips/lib/pkgconfig:$PKG_CONFIG_PATH"
-ENV CPPPATH="/app/vendor/vips/include:$CPPPATH"
-ENV CPATH="/app/vendor/vips/include:$CPATH"
+ENV LD_LIBRARY_PATH="/app/vendor/vips/lib"
+ENV LIBRARY_PATH="/app/vendor/vips/lib"
+ENV PKG_CONFIG_PATH="/app/vendor/vips/lib/pkgconfig"
+ENV CPPPATH="/app/vendor/vips/include"
+ENV CPATH="/app/vendor/vips/include"
 
 # Verify all shared library dependencies resolve (catches missing runtime libs)
 RUN ldd /app/vendor/vips/lib/libvips.so | grep "not found" && exit 1 || true
 
+# Simulate a real Scalingo app: install ruby-vips via Bundler as appsdeck
+RUN mkdir -p /app && \
+    echo 'source "https://rubygems.org"' > /app/Gemfile && \
+    echo 'gem "ruby-vips"' >> /app/Gemfile && \
+    cd /app && bundle config set --local path vendor/bundle && bundle install
+
 # Verify vips works and ruby-vips can link to it
+WORKDIR /app
 RUN vips --version && \
-    ruby -e 'require "vips"; puts "Success: ruby-vips linked to #{Vips::LIBRARY_VERSION}"'
+    bundle exec ruby -e 'require "vips"; puts "Success: ruby-vips linked to #{Vips::LIBRARY_VERSION}"'
