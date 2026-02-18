@@ -5,9 +5,7 @@ FROM scalingo/scalingo-24:latest
 USER root
 RUN mkdir -p /var/log/apt /var/log && \
     apt-get update && apt-get install -y --no-install-recommends \
-      ruby-dev \
-      libpoppler-glib8 \
-      liborc-0.4-0
+      ruby-dev
 
 # Copy entire buildpack to /tmp/buildpack (mirrors real Scalingo layout)
 COPY --chown=appsdeck . /tmp/buildpack

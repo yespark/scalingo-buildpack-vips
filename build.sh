@@ -10,7 +10,7 @@ fi
 echo "-----> Target Version: $VIPS_VERSION"
 
 mkdir -p ./build/configurations
-rm -f ./build/*.tar.gz ./build/configurations/*.log
+rm -f ./build/*.tar.bz2 ./build/*.tar.gz ./build/configurations/*.log
 
 echo "-----> Building libvips $VIPS_VERSION"
 
@@ -22,6 +22,7 @@ docker buildx build --platform linux/amd64 \
 
 echo "-----> Testing tarball integrity"
 docker buildx build --platform linux/amd64 --progress=plain \
-  -t libvips-test -f container/Dockerfile.test .
+  -t libvips-test \
+  -f container/Dockerfile.test .
 
-echo "Done! Final artifact: build/scalingo.tar.gz"
+echo "Done! Final artifact: build/scalingo.tar.bz2"

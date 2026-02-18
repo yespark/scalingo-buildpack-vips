@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 
+if [ -n "$BUILDPACK_DEBUG" ]; then
+  set -x
+fi
+
 if [[ $STACK = "scalingo-24" ]]; then
-  exit 0
+  echo "vips" && exit 0
 else
-  echo "vips buildpack only supports scalingo-24"
-  exit 1
+  echo "vips buildpack only supports scalingo-24" && exit 1
 fi

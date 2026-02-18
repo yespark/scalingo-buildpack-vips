@@ -21,7 +21,7 @@ VIPS_VERSION=8.18.0 ./build.sh
 
 ```
 
-This script uses `docker buildx` with the `--output` flag to export `build/scalingo.tar.gz` and `build/configurations/` directly to your host machine without needing a `docker cp` step.
+This script uses `docker buildx` with the `--output` flag to export `build/scalingo.tar.bz2` and `build/configurations/` directly to your host machine without needing a `docker cp` step.
 
 ### Test Validation
 
@@ -37,9 +37,10 @@ The build script automatically runs **`container/Dockerfile.test`**. This:
 This is a standard Scalingo/Heroku-style buildpack:
 
 * **`bin/detect`**: Restricts usage to the `scalingo-24` stack (Ubuntu 24.04).
-* **`bin/compile`**: Called during deploy. Extracts `build/scalingo.tar.gz` into `$BUILD_DIR/vendor/vips` and generates a `.profile.d/vips.sh` script to set up `LD_LIBRARY_PATH` and other env vars for the app runtime.
+* **`bin/compile`**: Called during deploy. Accepts `$1` (BUILD_DIR), `$2` (CACHE_DIR), and optionally `$3` (ENV_DIR). Extracts `build/scalingo.tar.bz2` into `$BUILD_DIR/vendor/vips` and generates a `.profile.d/vips.sh` script to set up `LD_LIBRARY_PATH` and other env vars for the app runtime. Supports version pinning via `VIPS_VERSION` in `$ENV_DIR`.
 * **`build.sh`**: Orchestrates the Docker build. It fetches the latest version from the GitHub API if `VIPS_VERSION` is not provided.
 * **`.github/workflows/build-vips.yml`**: Automates the build on a weekly schedule or on push, committing updated binaries back to the repo.
+* **`.sclng/metadata.toml`**: Scalingo ecosystem buildpack metadata.
 
 ## Docker Build Pipeline (`container/Dockerfile`)
 
@@ -54,6 +55,11 @@ The build process is split into two stages:
 
 
 2. **Exporter Stage**: A `scratch` image that only contains the resulting tarball and config logs, allowing for clean extraction.
+
+## Runtime Configuration
+
+* **`VIPS_VERSION`**: Set this env var on your Scalingo app to pin `bin/compile` to a specific release (e.g., `scalingo env-set VIPS_VERSION=8.18.0`). When set, the buildpack fetches `/releases/tags/v${VIPS_VERSION}` instead of `/releases/latest`. The existing cache invalidation (VERSION file comparison) handles version switches automatically.
+* **`BUILDPACK_DEBUG`**: Set this env var to enable `set -x` tracing in both `bin/detect` and `bin/compile` for troubleshooting deploy issues.
 
 ## Key Details
 
