@@ -1,21 +1,33 @@
 # syntax=docker/dockerfile:1
 FROM scalingo/scalingo-24:latest
 
-# Phase 1: System setup (as root)
+# Phase 1: System setup (as root) — cached unless base image changes
 USER root
-RUN mkdir -p /var/log/apt /var/log && \
-    apt-get update && apt-get install -y --no-install-recommends \
-      ruby-dev
 
-# Copy entire buildpack to /tmp/buildpack (mirrors real Scalingo layout)
-COPY --chown=appsdeck . /tmp/buildpack
-RUN chmod +x /tmp/buildpack/bin/compile /tmp/buildpack/bin/detect
+RUN mkdir -p /var/log/apt /var/log
+
+# Remove ImageMagick to guarantee Rails image_processing uses vips exclusively.
+# Only purge imagemagick/libmagick packages — do NOT use --auto-remove, as it
+# would cascade and remove shared dependencies (libfftw3, libcairo, libpango,
+# librsvg, etc.) that libvips also needs.
+RUN dpkg -l | grep -Ei 'imagemagick|libmagick' | awk '{print $2}' | \
+    xargs -r apt-get purge -y
+
+RUN apt-get update && apt-get install -y --no-install-recommends ruby-dev
+
+# Install Rails system-wide early so this layer is cached across tarball rebuilds
+RUN gem install rails --no-document
 
 # Create cache directory (bin/compile expects $2)
 RUN mkdir -p /tmp/cache && chown appsdeck:appsdeck /tmp/cache
 
 # Set STACK so bin/detect works
 ENV STACK=scalingo-24
+
+# Copy entire buildpack to /tmp/buildpack (mirrors real Scalingo layout)
+# NOTE: placed after gem install so tarball changes don't invalidate the Rails layer
+COPY --chown=appsdeck . /tmp/buildpack
+RUN chmod +x /tmp/buildpack/bin/compile /tmp/buildpack/bin/detect
 
 # Phase 2: Run buildpack scripts (as appsdeck)
 USER appsdeck
@@ -34,12 +46,16 @@ RUN . /app/.profile.d/vips.sh && vips --version
 RUN . /app/.profile.d/vips.sh && \
     ldd /app/vendor/vips/lib/libvips.so | grep "not found" && exit 1 || true
 
-# Phase 4: Ruby integration test
+# Phase 4: Rails integration test (Active Storage depends on image_processing → ruby-vips + mini_magick)
+ENV BUNDLE_PATH=/app/dummy/vendor/bundle
 RUN . /app/.profile.d/vips.sh && \
-    echo 'source "https://rubygems.org"' > /app/Gemfile && \
-    echo 'gem "ruby-vips"' >> /app/Gemfile && \
-    cd /app && bundle config set --local path vendor/bundle && bundle install
+    rails new /app/dummy --minimal --no-skip-active-storage
 
-WORKDIR /app
+WORKDIR /app/dummy
+
+# Phase 5: Image processing tests with real files (resize, JPEG, WebP conversion)
+COPY --chown=appsdeck test/fixtures/ /app/dummy/test/fixtures/
+COPY --chown=appsdeck test/vips_test.rb /app/dummy/test/vips_test.rb
+
 RUN . /app/.profile.d/vips.sh && \
-    bundle exec ruby -e 'require "vips"; puts "Success: ruby-vips linked to #{Vips::LIBRARY_VERSION}"'
+    bundle exec rails test test/vips_test.rb

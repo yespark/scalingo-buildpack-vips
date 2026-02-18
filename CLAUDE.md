@@ -44,17 +44,19 @@ This is a standard Scalingo/Heroku-style buildpack:
 
 ## Docker Build Pipeline (`container/Dockerfile`)
 
-The build process is split into two stages:
+The build process is split into three stages:
 
-1. **Builder Stage**:
+1. **Base-Snapshot Stage**: Runs on the clean `scalingo/scalingo-24:latest` image and records every `.so` filename present *before* build dependencies are installed. This inventory is saved to `/tmp/base-libs.txt`.
+
+2. **Builder Stage**:
 * Based on `scalingo/scalingo-24:latest`.
 * Uses `--mount=type=cache` for `apt` packages to speed up rebuilds.
 * Installs build tools (`meson`, `ninja`, `pkg-config`) and system headers for libraries already present on the Scalingo stack (glib, webp, jpeg, tiff, etc.).
 * Compiles libvips into a clean, isolated prefix (`/opt/vips-build`).
 * Strips symbols from binaries to reduce slug size.
+* **Bundles runtime shared libraries**: Uses `ldd` on `libvips.so` and diffs the results against the base-snapshot to copy any shared libraries that aren't on the base image (e.g., poppler, orc, openjp2) into the prefix's `lib/` directory. This makes the tarball self-contained — no extra `apt-get install` is needed at deploy time.
 
-
-2. **Exporter Stage**: A `scratch` image that only contains the resulting tarball and config logs, allowing for clean extraction.
+3. **Exporter Stage**: A `scratch` image that only contains the resulting tarball and config logs, allowing for clean extraction.
 
 ## Runtime Configuration
 

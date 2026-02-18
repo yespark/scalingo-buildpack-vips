@@ -65,8 +65,10 @@ fetch_tarball() {
     return 1
   fi
 
-  # 3. Check cache
-  local cache_dir="${CACHE_DIR}/vips"
+  # 3. Check cache (namespaced by OS version for multi-stack support)
+  source /etc/os-release
+  local os_version="${ID}-${VERSION_ID}"
+  local cache_dir="${CACHE_DIR}/${os_version}/vips"
   local cached_tarball="${cache_dir}/${ASSET_NAME}"
   local cached_version="${cache_dir}/VERSION"
 
