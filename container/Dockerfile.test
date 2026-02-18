@@ -1,19 +1,27 @@
 # syntax=docker/dockerfile:1
 FROM scalingo/scalingo-24:latest
+
+# Install test dependencies as root (these won't be available in production,
+# but are needed to verify the shared library linking works)
 USER root
+RUN apt-get update && apt-get install -y --no-install-recommends ruby-dev && \
+    gem install ruby-vips
 
-# Copy the built tarball
-COPY build/scalingo.tar.gz /tmp/vips.tar.gz
+# Switch to appsdeck to match the real Scalingo runtime environment
+USER appsdeck
 
-# Vendor it exactly like the buildpack does
+# Copy the built tarball and extract it like bin/compile does
+COPY --chown=appsdeck build/scalingo.tar.gz /tmp/vips.tar.gz
 RUN mkdir -p /app/vendor/vips && tar -xz -f /tmp/vips.tar.gz -C /app/vendor/vips
 
-# Setup runtime environment
+# Set the same environment variables that bin/compile generates via .profile.d/vips.sh
 ENV PATH="/app/vendor/vips/bin:$PATH"
 ENV LD_LIBRARY_PATH="/app/vendor/vips/lib:$LD_LIBRARY_PATH"
+ENV LIBRARY_PATH="/app/vendor/vips/lib:$LIBRARY_PATH"
+ENV PKG_CONFIG_PATH="/app/vendor/vips/lib/pkgconfig:$PKG_CONFIG_PATH"
+ENV CPPPATH="/app/vendor/vips/include:$CPPPATH"
+ENV CPATH="/app/vendor/vips/include:$CPATH"
 
-# Sanity check + Ruby test
+# Verify vips works and ruby-vips can link to it
 RUN vips --version && \
-    apt-get update && apt-get install -y ruby-dev && \
-    gem install ruby-vips && \
-    ruby -e 'require "vips"; puts "✓ Success: ruby-vips linked to #{Vips::LIBRARY_VERSION}"'
+    ruby -e 'require "vips"; puts "Success: ruby-vips linked to #{Vips::LIBRARY_VERSION}"'

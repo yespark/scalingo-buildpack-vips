@@ -4,23 +4,32 @@ FROM scalingo/scalingo-24:latest AS builder
 USER root
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Use cache mounts for faster APT runs during development
+# Install only packages not already on the scalingo-24 base image
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
-    build-essential libtool wget ninja-build pkg-config meson \
-    glib-2.0-dev libexpat1-dev libpango1.0-dev librsvg2-dev \
-    libpng-dev libwebp-dev libjpeg-dev libtiff-dev \
-    libexif-dev liblcms2-dev libxml2-dev libfftw3-dev \
-    libopenexr-dev libopenjp2-7-dev libpoppler-glib-dev \
-    libimagequant-dev liborc-0.4-dev libcgif-dev libheif-dev
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+      ninja-build \
+      pkg-config \
+      meson \
+      glib-2.0-dev \
+      libexpat1-dev \
+      libpango1.0-dev \
+      libpng-dev \
+      libxml2-dev \
+      libfftw3-dev \
+      libpoppler-glib-dev \
+      libimagequant-dev \
+      liborc-0.4-dev \
+      libcgif-dev \
+      libheif-dev
 
 ARG VIPS_VERSION=8.18.0
 ARG PREFIX=/opt/vips-build
 WORKDIR /usr/local/src
 
 # Build libvips
-RUN wget -q https://github.com/libvips/libvips/releases/download/v${VIPS_VERSION}/vips-${VIPS_VERSION}.tar.xz \
+RUN curl -sSLo vips-${VIPS_VERSION}.tar.xz https://github.com/libvips/libvips/releases/download/v${VIPS_VERSION}/vips-${VIPS_VERSION}.tar.xz \
     && tar xf vips-${VIPS_VERSION}.tar.xz \
     && cd vips-${VIPS_VERSION} \
     && meson setup build --prefix=$PREFIX --libdir=lib --buildtype=release \
