@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 FROM scalingo/scalingo-24:latest
 
-# Install ruby-dev as root (needed for native extension compilation)
+# Phase 1: System setup (as root)
 USER root
 RUN mkdir -p /var/log/apt /var/log && \
     apt-get update && apt-get install -y --no-install-recommends \
@@ -9,31 +9,39 @@ RUN mkdir -p /var/log/apt /var/log && \
       libpoppler-glib8 \
       liborc-0.4-0
 
-# Switch to appsdeck to match the real Scalingo runtime environment
+# Copy entire buildpack to /tmp/buildpack (mirrors real Scalingo layout)
+COPY --chown=appsdeck . /tmp/buildpack
+RUN chmod +x /tmp/buildpack/bin/compile /tmp/buildpack/bin/detect
+
+# Create cache directory (bin/compile expects $2)
+RUN mkdir -p /tmp/cache && chown appsdeck:appsdeck /tmp/cache
+
+# Set STACK so bin/detect works
+ENV STACK=scalingo-24
+
+# Phase 2: Run buildpack scripts (as appsdeck)
 USER appsdeck
 
-# Copy the built tarball and extract it like bin/compile does
-COPY --chown=appsdeck build/scalingo.tar.gz /tmp/vips.tar.gz
-RUN mkdir -p /app/vendor/vips && tar -xz -f /tmp/vips.tar.gz -C /app/vendor/vips
+# Test bin/detect
+RUN /tmp/buildpack/bin/detect
 
-# Set the same environment variables that bin/compile generates via .profile.d/vips.sh
-ENV PATH="/app/vendor/vips/bin:$PATH"
-ENV LD_LIBRARY_PATH="/app/vendor/vips/lib"
-ENV LIBRARY_PATH="/app/vendor/vips/lib"
-ENV PKG_CONFIG_PATH="/app/vendor/vips/lib/pkgconfig"
-ENV CPPPATH="/app/vendor/vips/include"
-ENV CPATH="/app/vendor/vips/include"
+# Test bin/compile: extracts tarball, generates .profile.d/vips.sh
+RUN /tmp/buildpack/bin/compile /app /tmp/cache
 
-# Verify all shared library dependencies resolve (catches missing runtime libs)
-RUN ldd /app/vendor/vips/lib/libvips.so | grep "not found" && exit 1 || true
+# Phase 3: Validate
+RUN test -f /app/.profile.d/vips.sh
 
-# Simulate a real Scalingo app: install ruby-vips via Bundler as appsdeck
-RUN mkdir -p /app && \
+RUN . /app/.profile.d/vips.sh && vips --version
+
+RUN . /app/.profile.d/vips.sh && \
+    ldd /app/vendor/vips/lib/libvips.so | grep "not found" && exit 1 || true
+
+# Phase 4: Ruby integration test
+RUN . /app/.profile.d/vips.sh && \
     echo 'source "https://rubygems.org"' > /app/Gemfile && \
     echo 'gem "ruby-vips"' >> /app/Gemfile && \
     cd /app && bundle config set --local path vendor/bundle && bundle install
 
-# Verify vips works and ruby-vips can link to it
 WORKDIR /app
-RUN vips --version && \
+RUN . /app/.profile.d/vips.sh && \
     bundle exec ruby -e 'require "vips"; puts "Success: ruby-vips linked to #{Vips::LIBRARY_VERSION}"'
