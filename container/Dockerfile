@@ -21,7 +21,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
       libpoppler-glib-dev \
       libimagequant-dev \
       liborc-0.4-dev \
-      libcgif-dev \
       libheif-dev
 
 ARG VIPS_VERSION=8.18.0
@@ -33,7 +32,7 @@ RUN curl -sSLo vips-${VIPS_VERSION}.tar.xz https://github.com/libvips/libvips/re
     && tar xf vips-${VIPS_VERSION}.tar.xz \
     && cd vips-${VIPS_VERSION} \
     && meson setup build --prefix=$PREFIX --libdir=lib --buildtype=release \
-       -Dradiance=false -Danalyze=false -Dmodules=disabled -Dintrospection=disabled \
+       -Dradiance=false -Danalyze=false -Dcgif=disabled -Dmodules=disabled -Dintrospection=disabled \
     && cd build && meson compile && meson install
 
 # Clean and bundle the artifact
