@@ -130,6 +130,7 @@ export LIBRARY_PATH="$APP_VIPS/lib\${LIBRARY_PATH:+:\$LIBRARY_PATH}"
 export PKG_CONFIG_PATH="$APP_VIPS/lib/pkgconfig\${PKG_CONFIG_PATH:+:\$PKG_CONFIG_PATH}"
 export CPPPATH="$APP_VIPS/include\${CPPPATH:+:\$CPPPATH}"
 export CPATH="$APP_VIPS/include\${CPATH:+:\$CPATH}"
+export LIBHEIF_PLUGIN_PATH="$APP_VIPS/lib/heif-plugins"
 EOF
 
 # Build-time setup for subsequent buildpacks (like Ruby/Python)

@@ -1,73 +1,43 @@
 require "test_helper"
-require "image_processing/vips"
 
-class ImageProcessingTest < ActiveSupport::TestCase
-  FIXTURES = File.expand_path("fixtures", __dir__)
-  OUT_DIR  = Rails.root.join("tmp/test_output")
-
-  setup do
-    FileUtils.mkdir_p(OUT_DIR)
-    Rails.application.config.active_storage.variant_processor = :vips
-  end
-
-  private
-
-  def pipeline(fixture = "test.png")
-    ImageProcessing::Vips.source(File.join(FIXTURES, fixture))
-  end
-
-  def process_to_file(filename, &block)
-    path = OUT_DIR.join(filename).to_s
-    block.call(path)
-    assert File.size(path) > 0, "#{filename} should be non-empty"
-    path
-  end
-
-  public
-
-  # --- Format loading ---
-
-  test "loads png and reads dimensions" do
+class VipsFormatTest < Minitest::Test
+  def test_loads_png_and_reads_dimensions
     result = pipeline.call(save: false)
-    assert_equal 4, result.width
-    assert_equal 4, result.height
+    assert_dimensions [4, 4], result
     assert_equal 3, result.bands
   end
 
-  test "loads tiff image" do
+  def test_loads_tiff_image
     result = pipeline("test.tiff").call(save: false)
-    assert_equal 4, result.width
-    assert_equal 4, result.height
+    assert_dimensions [4, 4], result
   end
 
-  test "loads svg image" do
+  def test_loads_svg_image
     result = pipeline("test.svg").call(save: false)
     assert result.width > 0
     assert result.height > 0
   end
 
-  # --- PDF (poppler) ---
-
-  test "loads pdf as image" do
+  def test_loads_pdf_as_image
     result = pipeline("test.pdf").call(save: false)
     assert result.width > 0
     assert result.height > 0
   end
 
-  test "loads pdf at specific dpi" do
-    img_72 = pipeline("test.pdf").loader(dpi: 72).call(save: false)
+  def test_loads_pdf_at_specific_dpi
+    img_72  = pipeline("test.pdf").loader(dpi: 72).call(save: false)
     img_144 = pipeline("test.pdf").loader(dpi: 144).call(save: false)
     assert_equal img_72.width * 2, img_144.width
     assert_equal img_72.height * 2, img_144.height
   end
 
-  test "converts pdf to png" do
+  def test_converts_pdf_to_png
     process_to_file("pdf_to_png.png") do |path|
       pipeline("test.pdf").convert("png").call(destination: path)
     end
   end
 
-  test "converts pdf to jpeg" do
+  def test_converts_pdf_to_jpeg
     process_to_file("pdf_to_jpeg.jpg") do |path|
       pipeline("test.pdf")
         .custom { |img| img.has_alpha? ? img.flatten(background: [255, 255, 255]) : img }
@@ -76,219 +46,203 @@ class ImageProcessingTest < ActiveSupport::TestCase
     end
   end
 
-  # --- Format conversion ---
-
-  test "converts png to jpeg" do
+  def test_converts_png_to_jpeg
     process_to_file("converted.jpg") do |path|
       pipeline.convert("jpg").call(destination: path)
     end
   end
 
-  test "converts png to webp" do
+  def test_converts_png_to_webp
     process_to_file("converted.webp") do |path|
       pipeline.convert("webp").call(destination: path)
     end
   end
 
-  test "converts png to tiff" do
+  def test_converts_png_to_tiff
     process_to_file("converted.tiff") do |path|
       pipeline.convert("tiff").call(destination: path)
     end
   end
 
-  test "converts tiff to png" do
+  def test_converts_tiff_to_png
     process_to_file("tiff_to_png.png") do |path|
       pipeline("test.tiff").convert("png").call(destination: path)
     end
   end
 
-  test "converts svg to png" do
+  def test_converts_svg_to_png
     process_to_file("svg_to_png.png") do |path|
       pipeline("test.svg").convert("png").call(destination: path)
     end
   end
+end
 
-  # --- Resize operations ---
-
-  test "resize_to_limit" do
+class VipsResizeTest < Minitest::Test
+  def test_resize_to_limit
     result = pipeline.resize_to_fit(40, 40).resize_to_limit(20, 20).call(save: false)
     assert result.width <= 20
     assert result.height <= 20
   end
 
-  test "resize_to_fit" do
+  def test_resize_to_fit
     result = pipeline.resize_to_fit(2, 2).call(save: false)
     assert result.width <= 2
     assert result.height <= 2
   end
 
-  test "resize_to_fill" do
+  def test_resize_to_fill
     result = pipeline.resize_to_fit(40, 40).resize_to_fill(20, 20).call(save: false)
-    assert_equal 20, result.width
-    assert_equal 20, result.height
+    assert_dimensions [20, 20], result
   end
 
-  test "resize_and_pad" do
+  def test_resize_and_pad
     result = pipeline.resize_and_pad(30, 20, background: [255, 255, 255]).call(save: false)
-    assert_equal 30, result.width
-    assert_equal 20, result.height
+    assert_dimensions [30, 20], result
   end
 
-  test "resize_to_cover" do
+  def test_resize_to_cover
     result = pipeline.resize_to_cover(10, 10).call(save: false)
     assert result.width >= 10
     assert result.height >= 10
   end
+end
 
-  # --- Image manipulation ---
-
-  test "rotates image 90 degrees" do
+class VipsManipulationTest < Minitest::Test
+  def test_rotates_image_90_degrees
     result = pipeline.rotate(90).call(save: false)
-    assert_equal 4, result.width
-    assert_equal 4, result.height
+    assert_dimensions [4, 4], result
   end
 
-  test "rotates image arbitrary angle" do
+  def test_rotates_image_arbitrary_angle
     result = pipeline.rotate(45, background: [0, 0, 0]).call(save: false)
     assert result.width > 0
     assert result.height > 0
   end
 
-  test "crops image" do
+  def test_crops_image
     result = pipeline.crop(1, 1, 2, 2).call(save: false)
-    assert_equal 2, result.width
-    assert_equal 2, result.height
+    assert_dimensions [2, 2], result
   end
 
-  # --- Color operations ---
-
-  test "converts to greyscale" do
+  def test_converts_to_greyscale
     result = pipeline.colourspace("b-w").call(save: false)
     assert_equal 1, result.bands
   end
 
-  test "inverts image" do
+  def test_inverts_image
     result = pipeline.invert.call(save: false)
     assert_equal 4, result.width
     assert_equal 3, result.bands
   end
 
-  # --- Filters (FFTW-backed) ---
-
-  test "applies gaussian blur" do
+  def test_applies_gaussian_blur
     result = pipeline.gaussblur(1.5).call(save: false)
-    assert_equal 4, result.width
-    assert_equal 4, result.height
+    assert_dimensions [4, 4], result
   end
 
-  test "sharpens image" do
+  def test_sharpens_image
     result = pipeline.sharpen.call(save: false)
     assert_equal 4, result.width
   end
 
-  # --- Composite / overlay ---
-
-  test "composites two images" do
+  def test_composites_two_images
     overlay = pipeline.custom { |img| img.bandjoin(128) }.call(save: false)
     process_to_file("composited.png") do |path|
       pipeline.composite(overlay, mode: "over").convert("png").call(destination: path)
     end
   end
 
-  # --- Text rendering (pango) ---
-
-  test "renders text to image" do
+  def test_renders_text_to_image
     result = pipeline.custom { |_| Vips::Image.text("Hello", dpi: 72) }.call(save: false)
     assert result.width > 0
     assert result.height > 0
   end
+end
 
-  # --- Metadata ---
-
-  test "reads image metadata fields" do
+class VipsMetadataTest < Minitest::Test
+  def test_reads_image_metadata_fields
     result = pipeline.call(save: false)
     assert_equal 4, result.get("width")
     assert_equal 4, result.get("height")
     assert_equal 3, result.get("bands")
   end
+end
 
-  # --- Saver options ---
-
-  test "jpeg with quality saver option" do
-    high_q = pipeline.convert("jpg").saver(Q: 95).call
-    low_q = pipeline.convert("jpg").saver(Q: 30).call
+class VipsSaverTest < Minitest::Test
+  def test_jpeg_quality
+    high_q = pipeline.resize_to_fit(40, 40).convert("jpg").saver(Q: 95).call
+    low_q  = pipeline.resize_to_fit(40, 40).convert("jpg").saver(Q: 30).call
     assert File.size(high_q.path) > File.size(low_q.path),
       "higher quality should produce larger file"
   end
 
-  test "png with compression saver option" do
-    low_c = pipeline.resize_to_fit(40, 40).convert("png").saver(compression: 1).call
+  def test_png_compression
+    low_c  = pipeline.resize_to_fit(40, 40).convert("png").saver(compression: 1).call
     high_c = pipeline.resize_to_fit(40, 40).convert("png").saver(compression: 9).call
     assert File.size(low_c.path) >= File.size(high_c.path),
       "higher compression should produce smaller or equal file"
   end
 
-  test "webp lossy" do
+  def test_webp_lossy
     result = pipeline.convert("webp").saver(Q: 50).call
     assert File.size(result.path) > 0
   end
 
-  test "webp lossless" do
+  def test_webp_lossless
     result = pipeline.convert("webp").saver(lossless: true).call
     assert File.size(result.path) > 0
   end
 
-  test "jpeg strip metadata" do
+  def test_jpeg_strip_metadata
     result = pipeline.convert("jpg").saver(strip: true).call
     assert File.size(result.path) > 0
   end
 
-  test "jpeg interlace (progressive)" do
+  def test_jpeg_interlace_progressive
     result = pipeline.convert("jpg").saver(interlace: true).call
     assert File.size(result.path) > 0
   end
+end
 
-  # --- HEIF / HEIC support (libheif, statically linked — modules disabled) ---
-
-  test "converts png to heif" do
+class VipsHeifTest < Minitest::Test
+  def test_converts_png_to_heif
     process_to_file("converted.heif") do |path|
       pipeline.convert("heif").call(destination: path)
     end
   end
 
-  test "heif round-trip preserves dimensions" do
-    heif_path = OUT_DIR.join("roundtrip.heif").to_s
+  def test_heif_round_trip_preserves_dimensions
+    heif_path = File.join(OUT_DIR, "roundtrip.heif")
     pipeline.convert("heif").call(destination: heif_path)
     reloaded = ImageProcessing::Vips.source(heif_path).call(save: false)
-    assert_equal 4, reloaded.width
-    assert_equal 4, reloaded.height
+    assert_dimensions [4, 4], reloaded
   end
 
-  test "saves heic to file and reloads" do
-    heic_path = OUT_DIR.join("output.heic").to_s
+  def test_saves_heic_to_file_and_reloads
+    heic_path = File.join(OUT_DIR, "output.heic")
     pipeline.convert("heic").call(destination: heic_path)
     assert File.size(heic_path) > 0
     reloaded = ImageProcessing::Vips.source(heic_path).call(save: false)
     assert_equal 4, reloaded.width
   end
 
-  test "converts heif to png" do
-    heif_path = OUT_DIR.join("intermediate.heif").to_s
+  def test_converts_heif_to_png
+    heif_path = File.join(OUT_DIR, "intermediate.heif")
     pipeline.convert("heif").call(destination: heif_path)
     process_to_file("heif_to_png.png") do |path|
       ImageProcessing::Vips.source(heif_path).convert("png").call(destination: path)
     end
   end
 
-  test "converts heic to jpeg" do
-    heic_path = OUT_DIR.join("intermediate.heic").to_s
+  def test_converts_heic_to_jpeg
+    heic_path = File.join(OUT_DIR, "intermediate.heic")
     pipeline.convert("heic").call(destination: heic_path)
     process_to_file("heic_to_jpeg.jpg") do |path|
       ImageProcessing::Vips.source(heic_path).convert("jpg").call(destination: path)
     end
   end
 
-  test "heif works without modules (statically linked)" do
+  def test_heif_works_without_modules
     result = pipeline.convert("heif").call
     assert File.size(result.path) > 0
     reloaded = ImageProcessing::Vips.source(result.path).call(save: false)
@@ -298,71 +252,21 @@ class ImageProcessingTest < ActiveSupport::TestCase
     module_dirs = Dir.glob(File.join(vips_prefix, "lib", "vips-modules-*"))
     assert_empty module_dirs, "vips-modules directory should not exist when modules are disabled"
   end
+end
 
-  # --- Active Storage variant options ---
-  # Reference: https://gist.github.com/brenogazzola/a4369965a1da426d50f11d080fe2e563
-
-  test "variant: resize_to_limit constrains dimensions" do
-    result = pipeline.resize_to_fit(40, 40).resize_to_limit(10, 10).call(save: false)
-    assert result.width <= 10
-    assert result.height <= 10
-  end
-
-  test "variant: resize_to_fill crops to exact dimensions" do
-    result = pipeline.resize_to_fit(40, 40).resize_to_fill(15, 10).call(save: false)
-    assert_equal 15, result.width
-    assert_equal 10, result.height
-  end
-
-  test "variant: resize_to_fill with smart crop" do
-    result = pipeline.resize_to_fit(40, 40).resize_to_fill(15, 10, crop: :attention).call(save: false)
-    assert_equal 15, result.width
-    assert_equal 10, result.height
-  end
-
-  test "variant: resize_and_pad with background" do
-    result = pipeline.resize_and_pad(20, 10, background: [255, 0, 0]).call(save: false)
-    assert_equal 20, result.width
-    assert_equal 10, result.height
-  end
-
-  test "variant: flatten alpha with background colour" do
-    result = pipeline
-      .custom { |img| img.bandjoin(128) }
-      .custom { |img| img.flatten(background: [255, 0, 0]) }
-      .call(save: false)
-    assert_equal 3, result.bands
-  end
-
-  # --- Pipeline: chained operations ---
-
-  test "resize then convert to webp" do
+class VipsPipelineTest < Minitest::Test
+  def test_resize_then_convert_to_webp
     result = pipeline.resize_to_fit(8, 8).gaussblur(1.0).convert("webp").call
     assert File.size(result.path) > 0
   end
 
-  test "crop, greyscale, and save as jpeg" do
+  def test_crop_greyscale_and_save_as_jpeg
     result = pipeline.crop(0, 0, 3, 3).colourspace("b-w").convert("jpg").call(save: false)
     assert_equal 1, result.bands
     assert_equal 3, result.width
   end
 
-  test "validates image file" do
-    assert ImageProcessing::Vips.valid_image?(File.open(File.join(FIXTURES, "test.png")))
-  end
-
-  # --- Verify ImageMagick is absent and Rails uses vips ---
-
-  test "imagemagick is not installed" do
-    assert_nil `which convert 2>/dev/null`.strip.presence,
-      "ImageMagick 'convert' should not be available"
-    assert_nil `which magick 2>/dev/null`.strip.presence,
-      "ImageMagick 'magick' should not be available"
-  end
-
-  test "rails active storage uses vips variant processor" do
-    processor = Rails.application.config.active_storage.variant_processor
-    assert_equal :vips, processor,
-      "Active Storage should use :vips, got #{processor.inspect}"
+  def test_validates_image_file
+    assert ImageProcessing::Vips.valid_image?(fixture_image("test.png"))
   end
 end

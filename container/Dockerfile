@@ -18,8 +18,8 @@ COPY --from=base-snapshot /tmp/base-libs.txt /tmp/base-libs.txt
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     mkdir -p /var/log/apt && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
+    apt-get update -qq -o Acquire::Retries=3 && \
+    apt-get install -qq -o Acquire::Retries=3 -y --no-install-recommends \
       ninja-build \
       pkg-config \
       meson \
@@ -32,7 +32,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
       libpoppler-glib-dev \
       libimagequant-dev \
       liborc-0.4-dev \
-      libheif-dev
+      libheif-dev \
+      libheif-plugin-x265
 
 ARG VIPS_VERSION=8.18.0
 ARG PREFIX=/opt/vips-build
@@ -65,6 +66,17 @@ RUN mkdir -p /export/configurations \
            soname=$(basename "$sopath"); \
            grep -qxF "$soname" /tmp/base-libs.txt || cp -L "$sopath" lib/ ; \
          done \
+    # Bundle libheif plugins (dynamically loaded, not caught by ldd)
+    && cp -rL /usr/lib/x86_64-linux-gnu/libheif/plugins lib/heif-plugins \
+    && for plugin in lib/heif-plugins/*.so; do \
+         ldd "$plugin" | awk '/=>/ && $3 != "" {print $3}' \
+         | while read -r sopath; do \
+             soname=$(basename "$sopath"); \
+             grep -qxF "$soname" /tmp/base-libs.txt \
+               || test -f lib/"$soname" \
+               || cp -L "$sopath" lib/ ; \
+           done; \
+       done \
     && tar cjf "/export/scalingo.tar.bz2" bin include lib \
     && echo "vips --vips-version" > "/export/configurations/scalingo.config.log" \
     && $PREFIX/bin/vips --vips-version >> "/export/configurations/scalingo.config.log" \

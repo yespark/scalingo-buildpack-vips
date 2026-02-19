@@ -1,0 +1,3 @@
+[submodule "vendor/image_processing"]
+	path = vendor/image_processing
+	url = https://github.com/janko/image_processing.git
