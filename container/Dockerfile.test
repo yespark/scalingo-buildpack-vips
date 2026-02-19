@@ -55,7 +55,10 @@ RUN . /app/.profile.d/vips.sh && \
 
 # Phase 5: Upstream image_processing gem test suite
 # Verifies our compiled vips passes the gem's own tests
-COPY --chown=appsdeck vendor/image_processing/ /tmp/image_processing/
+ARG IMAGE_PROCESSING_REF=3b870f229581ed2c2915f2c2c251ea9e686e0e4a
+RUN git clone --quiet https://github.com/janko/image_processing.git /tmp/image_processing \
+    && cd /tmp/image_processing \
+    && git checkout --quiet $IMAGE_PROCESSING_REF
 
 RUN . /app/.profile.d/vips.sh && \
     cd /tmp/image_processing && \
