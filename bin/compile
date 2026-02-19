@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -e
+set -eo pipefail
 
 if [ -n "$BUILDPACK_DEBUG" ]; then
   set -x
@@ -116,7 +116,7 @@ fetch_tarball "$TARBALL" || {
 }
 
 mkdir -p "$VENDOR_DEST"
-tar -xj -f "$TARBALL" -C "$VENDOR_DEST" | indent
+tar -xjf "$TARBALL" -C "$VENDOR_DEST"
 rm -f "$TARBALL"
 
 echo "Configuring environment" | arrow

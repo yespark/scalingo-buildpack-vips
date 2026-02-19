@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
 # Automatically fetch the latest stable VIPS version if not set
-if [ -z "$VIPS_VERSION" ]; then
+if [ -z "${VIPS_VERSION:-}" ]; then
   echo "-----> Fetching latest libvips version from GitHub..."
-  VIPS_VERSION=$(curl -s https://api.github.com/repos/libvips/libvips/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+  VIPS_VERSION=$(curl --fail --silent --show-error \
+    https://api.github.com/repos/libvips/libvips/releases/latest \
+    | grep '"tag_name":' \
+    | sed -E 's/.*"v([^"]+)".*/\1/')
+fi
+
+if [ -z "$VIPS_VERSION" ]; then
+  echo "Error: Could not determine VIPS_VERSION" >&2
+  exit 1
 fi
 
 echo "-----> Target Version: $VIPS_VERSION"

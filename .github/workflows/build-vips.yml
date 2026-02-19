@@ -1,6 +1,10 @@
 name: Build and Release libvips
 
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   schedule:
     - cron: '0 0 * * 0' # Run every Sunday at midnight
   workflow_dispatch:

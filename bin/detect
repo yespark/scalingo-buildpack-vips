@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
+set -eo pipefail
 
-if [ -n "$BUILDPACK_DEBUG" ]; then
+if [ -n "${BUILDPACK_DEBUG:-}" ]; then
   set -x
 fi
 
-if [[ $STACK = "scalingo-24" ]]; then
-  echo "vips" && exit 0
+if [[ "${STACK:-}" == "scalingo-24" ]]; then
+  echo "vips"
+  exit 0
 else
-  echo "vips buildpack only supports scalingo-24" && exit 1
+  echo "vips buildpack only supports scalingo-24" >&2
+  exit 1
 fi

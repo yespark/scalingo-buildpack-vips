@@ -55,7 +55,7 @@ RUN cd vips-${VIPS_VERSION}/build && meson compile && meson install
 RUN mkdir -p /export/configurations \
     && cd $PREFIX \
     && rm -rf bin/vipsprofile lib/*.a lib/python* \
-    && strip lib/libvips.so* \
+    && find bin lib -type f \( -name "*.so*" -o -executable \) -exec strip --strip-unneeded {} + 2>/dev/null || true \
     # Bundle shared libraries that libvips needs but aren't on the base image.
     # Compare ldd output against the base-image snapshot to find extras.
     && export LD_LIBRARY_PATH="$PREFIX/lib:${LD_LIBRARY_PATH:-}" \
@@ -64,7 +64,7 @@ RUN mkdir -p /export/configurations \
        | while read -r sopath; do \
            case "$sopath" in ${PREFIX}/*) continue ;; esac; \
            soname=$(basename "$sopath"); \
-           grep -qxF "$soname" /tmp/base-libs.txt || cp -L "$sopath" lib/ ; \
+           grep -qxF "$soname" /tmp/base-libs.txt || { cp -L "$sopath" lib/ && cd lib && ldconfig -l "$soname" 2>/dev/null; cd ..; }; \
          done \
     # Bundle libheif plugins (dynamically loaded, not caught by ldd)
     && cp -rL /usr/lib/x86_64-linux-gnu/libheif/plugins lib/heif-plugins \
@@ -80,7 +80,7 @@ RUN mkdir -p /export/configurations \
     && tar cjf "/export/scalingo.tar.bz2" bin include lib \
     && echo "vips --vips-version" > "/export/configurations/scalingo.config.log" \
     && $PREFIX/bin/vips --vips-version >> "/export/configurations/scalingo.config.log" \
-    && echo -e "\nvips --vips-config" >> "/export/configurations/scalingo.config.log" \
+    && printf '\nvips --vips-config\n' >> "/export/configurations/scalingo.config.log" \
     && $PREFIX/bin/vips --vips-config >> "/export/configurations/scalingo.config.log"
 
 # Stage 2: Exporter (copies files back to host via build.sh)
