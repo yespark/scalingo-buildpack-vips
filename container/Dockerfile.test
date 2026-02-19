@@ -62,3 +62,13 @@ RUN git clone --quiet https://github.com/janko/image_processing.git /tmp/image_p
 RUN . /app/.profile.d/vips.sh && \
     cd /tmp/image_processing && \
     ruby -Ilib -Itest test/vips_test.rb test/pipeline_test.rb test/builder_test.rb
+
+# Phase 6: Multi-buildpack simulation
+# Verifies that the export file provides enough environment for a
+# subsequent buildpack to compile native extensions against libvips.
+RUN test -f /tmp/buildpack/export
+
+SHELL ["/bin/bash", "-c"]
+RUN . /tmp/buildpack/export && \
+    gem install ruby-vips --user-install --no-document && \
+    ruby -e "require 'vips'; puts \"ruby-vips #{Vips::VERSION} linked to libvips #{Vips.version_string}\""
