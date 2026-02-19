@@ -136,6 +136,10 @@ EOF
 # Build-time setup for subsequent buildpacks (like Ruby/Python)
 export PATH="$VENDOR_DEST/bin:$PATH"
 export LD_LIBRARY_PATH="$VENDOR_DEST/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LIBRARY_PATH="$VENDOR_DEST/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
 export PKG_CONFIG_PATH="$VENDOR_DEST/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+
+# Pass environment to subsequent buildpacks
+export | grep -E -e ' (PATH|LD_LIBRARY_PATH|LIBRARY_PATH|PKG_CONFIG_PATH)=' > "$ROOT_DIR/export"
 
 echo "libvips $(vips --vips-version) successfully installed" | indent
