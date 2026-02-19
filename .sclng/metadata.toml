@@ -1,0 +1,7 @@
+[buildpack]
+id = "vips"
+name = "libvips"
+homepage = "https://github.com/yespark/scalingo-buildpack-vips"
+
+[buildpack.owner]
+name = "Yespark"

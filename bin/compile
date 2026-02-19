@@ -1,29 +1,125 @@
 #!/usr/bin/env bash
-set -e
+# bin/compile <build-dir> <cache-dir> <env-dir>
+
+set -eo pipefail
+
+if [ -n "$BUILDPACK_DEBUG" ]; then
+  set -x
+fi
 
 BUILD_DIR=$1
 CACHE_DIR=$2
+ENV_DIR=$3
 BUILDPACK_NAME=vips
 BIN_DIR=$(cd "$(dirname "$0")"; pwd)
 ROOT_DIR=$(dirname "$BIN_DIR")
 
+BUILDPACK_REPO="yespark/scalingo-buildpack-vips"
+ASSET_NAME="scalingo.tar.bz2"
+CURL_OPTS="--silent --show-error --fail --retry 3 --retry-connrefused --connect-timeout 10 -L"
+
+# Read VIPS_VERSION from ENV_DIR if available (allows version pinning via scalingo env)
+if [ -n "$ENV_DIR" ] && [ -f "$ENV_DIR/VIPS_VERSION" ]; then
+  VIPS_VERSION=$(cat "$ENV_DIR/VIPS_VERSION")
+fi
+
 indent() { sed -u 's/^/       /'; }
 arrow() { sed -u 's/^/-----> /'; }
 
-echo "Vendoring libvips binaries" | arrow
+fetch_tarball() {
+  local tarball_path="$1"
 
-# We look for scalingo.tar.gz specifically
-TARBALL="${ROOT_DIR}/build/scalingo.tar.gz"
-VENDOR_DEST="$BUILD_DIR/vendor/vips"
-APP_VIPS="/app/vendor/vips"
+  # 1. Local tarball (used during Docker test builds)
+  local local_tarball="${ROOT_DIR}/build/${ASSET_NAME}"
+  if [ -f "$local_tarball" ]; then
+    echo "Using local tarball at ${local_tarball}" | indent
+    cp "$local_tarball" "$tarball_path"
+    return 0
+  fi
 
-if [ ! -f "$TARBALL" ]; then
-  echo "Error: Tarball not found at $TARBALL" | indent
-  exit 1
+  # 2. Query release from GitHub
+  local api_url
+  if [ -n "$VIPS_VERSION" ]; then
+    echo "Fetching pinned release v${VIPS_VERSION} from GitHub..." | indent
+    api_url="https://api.github.com/repos/${BUILDPACK_REPO}/releases/tags/v${VIPS_VERSION}"
+  else
+    echo "Fetching latest release info from GitHub..." | indent
+    api_url="https://api.github.com/repos/${BUILDPACK_REPO}/releases/latest"
+  fi
+  local release_json
+  release_json=$(curl $CURL_OPTS "$api_url") || {
+    if [ -n "$VIPS_VERSION" ]; then
+      echo "Error: Release v${VIPS_VERSION} not found. Check that this version exists at" | indent
+      echo "https://github.com/${BUILDPACK_REPO}/releases/tags/v${VIPS_VERSION}" | indent
+    else
+      echo "Error: Failed to fetch release info from GitHub" | indent
+    fi
+    return 1
+  }
+
+  local tag
+  tag=$(echo "$release_json" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+  local download_url
+  download_url=$(echo "$release_json" | grep '"browser_download_url":' | grep "$ASSET_NAME" | sed -E 's/.*"([^"]+)".*/\1/')
+
+  if [ -z "$download_url" ]; then
+    echo "Error: Could not find ${ASSET_NAME} in release ${tag}" | indent
+    return 1
+  fi
+
+  # 3. Check cache (namespaced by OS version for multi-stack support)
+  source /etc/os-release
+  local os_version="${ID}-${VERSION_ID}"
+  local cache_dir="${CACHE_DIR}/${os_version}/vips"
+  local cached_tarball="${cache_dir}/${ASSET_NAME}"
+  local cached_version="${cache_dir}/VERSION"
+
+  if [ -f "$cached_tarball" ] && [ -f "$cached_version" ]; then
+    local cached_tag
+    cached_tag=$(cat "$cached_version")
+    if [ "$cached_tag" = "$tag" ]; then
+      echo "Using cached tarball (${tag})" | indent
+      cp "$cached_tarball" "$tarball_path"
+      return 0
+    fi
+    echo "Cached version ${cached_tag} differs from latest ${tag}, re-downloading..." | indent
+  fi
+
+  # 4. Download from GitHub Releases
+  echo "Downloading ${ASSET_NAME} from release ${tag}..." | indent
+  curl $CURL_OPTS -o "$tarball_path" "$download_url" || {
+    echo "Error: Failed to download ${ASSET_NAME}" | indent
+    return 1
+  }
+
+  # Update cache
+  mkdir -p "$cache_dir"
+  cp "$tarball_path" "$cached_tarball"
+  echo "$tag" > "$cached_version"
+  echo "Tarball cached for future builds" | indent
+
+  return 0
+}
+
+if [ -n "$VIPS_VERSION" ]; then
+  echo "Vendoring libvips binaries (pinned to v${VIPS_VERSION})" | arrow
+else
+  echo "Vendoring libvips binaries (latest)" | arrow
 fi
 
+VENDOR_DEST="$BUILD_DIR/vendor/vips"
+APP_VIPS="/app/vendor/vips"
+TARBALL=$(mktemp)
+
+fetch_tarball "$TARBALL" || {
+  echo "Error: Could not obtain tarball" | indent
+  rm -f "$TARBALL"
+  exit 1
+}
+
 mkdir -p "$VENDOR_DEST"
-tar -xz -f "$TARBALL" -C "$VENDOR_DEST" | indent
+tar -xjf "$TARBALL" -C "$VENDOR_DEST"
+rm -f "$TARBALL"
 
 echo "Configuring environment" | arrow
 
@@ -31,16 +127,24 @@ echo "Configuring environment" | arrow
 mkdir -p "$BUILD_DIR/.profile.d"
 cat <<EOF > "$BUILD_DIR/.profile.d/$BUILDPACK_NAME.sh"
 export PATH="$APP_VIPS/bin:\$PATH"
-export LD_LIBRARY_PATH="\$LD_LIBRARY_PATH:$APP_VIPS/lib"
-export LIBRARY_PATH="\$LIBRARY_PATH:$APP_VIPS/lib"
-export PKG_CONFIG_PATH="\$PKG_CONFIG_PATH:$APP_VIPS/lib/pkgconfig"
-export CPPPATH="\$CPPPATH:$APP_VIPS/include"
-export CPATH="\$CPATH:$APP_VIPS/include"
+export LD_LIBRARY_PATH="$APP_VIPS/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
+export LIBRARY_PATH="$APP_VIPS/lib\${LIBRARY_PATH:+:\$LIBRARY_PATH}"
+export PKG_CONFIG_PATH="$APP_VIPS/lib/pkgconfig\${PKG_CONFIG_PATH:+:\$PKG_CONFIG_PATH}"
+export CPPPATH="$APP_VIPS/include\${CPPPATH:+:\$CPPPATH}"
+export CPATH="$APP_VIPS/include\${CPATH:+:\$CPATH}"
+export LIBHEIF_PLUGIN_PATH="$APP_VIPS/lib/heif-plugins"
 EOF
 
 # Build-time setup for subsequent buildpacks (like Ruby/Python)
 export PATH="$VENDOR_DEST/bin:$PATH"
-export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$VENDOR_DEST/lib"
-export PKG_CONFIG_PATH="$PKG_CONFIG_PATH:$VENDOR_DEST/lib/pkgconfig"
+export LD_LIBRARY_PATH="$VENDOR_DEST/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LIBRARY_PATH="$VENDOR_DEST/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
+export INCLUDE_PATH="$VENDOR_DEST/include${INCLUDE_PATH:+:$INCLUDE_PATH}"
+export CPATH="$VENDOR_DEST/include${CPATH:+:$CPATH}"
+export CPPPATH="$VENDOR_DEST/include${CPPPATH:+:$CPPPATH}"
+export PKG_CONFIG_PATH="$VENDOR_DEST/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+
+# Pass environment to subsequent buildpacks
+export | grep -E -e ' (PATH|LD_LIBRARY_PATH|LIBRARY_PATH|INCLUDE_PATH|CPATH|CPPPATH|PKG_CONFIG_PATH)=' > "$ROOT_DIR/export"
 
 echo "libvips $(vips --vips-version) successfully installed" | indent

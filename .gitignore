@@ -1,0 +1,4 @@
+build/
+vendor/image_processing/
+.DS_Store
+.ruby-lsp/

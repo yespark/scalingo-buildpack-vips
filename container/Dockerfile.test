@@ -1,19 +1,74 @@
 # syntax=docker/dockerfile:1
 FROM scalingo/scalingo-24:latest
+
+# Phase 1: System setup (as root) — cached unless base image changes
 USER root
 
-# Copy the built tarball
-COPY build/scalingo.tar.gz /tmp/vips.tar.gz
+RUN mkdir -p /var/log/apt /var/log && \
+    apt-get update -qq -o Acquire::Retries=3 && \
+    apt-get install -qq -o Acquire::Retries=3 -y --no-install-recommends \
+      ruby-dev imagemagick libvips-dev && \
+    rm -rf /var/lib/apt/lists/*
 
-# Vendor it exactly like the buildpack does
-RUN mkdir -p /app/vendor/vips && tar -xz -f /tmp/vips.tar.gz -C /app/vendor/vips
+# Install gems needed for tests (cached unless base image changes)
+# - image_processing + dev deps for the upstream gem test suite
+# - our buildpack tests only need image_processing itself
+RUN gem install image_processing minitest-hooks minispec-metadata dhash-vips --no-document
 
-# Setup runtime environment
-ENV PATH="/app/vendor/vips/bin:$PATH"
-ENV LD_LIBRARY_PATH="/app/vendor/vips/lib:$LD_LIBRARY_PATH"
+# Create cache directory (bin/compile expects $2)
+RUN mkdir -p /tmp/cache && chown appsdeck:appsdeck /tmp/cache
 
-# Sanity check + Ruby test
-RUN vips --version && \
-    apt-get update && apt-get install -y ruby-dev && \
-    gem install ruby-vips && \
-    ruby -e 'require "vips"; puts "✓ Success: ruby-vips linked to #{Vips::LIBRARY_VERSION}"'
+# Set STACK so bin/detect works
+ENV STACK=scalingo-24
+# Disable ORC JIT — under QEMU emulation (ARM host → x86 guest) ORC's
+# runtime-generated SIMD code triggers "Illegal instruction" crashes.
+# The C fallback is functionally identical; production runs on native x86.
+ENV ORC_CODE=backup
+
+# Copy entire buildpack to /tmp/buildpack (mirrors real Scalingo layout)
+# NOTE: placed after gem install so tarball changes don't invalidate the gem layer
+COPY --chown=appsdeck . /tmp/buildpack
+RUN chmod +x /tmp/buildpack/bin/compile /tmp/buildpack/bin/detect
+
+# Phase 2: Run buildpack scripts (as appsdeck)
+USER appsdeck
+
+# Test bin/detect
+RUN /tmp/buildpack/bin/detect
+
+# Test bin/compile: extracts tarball, generates .profile.d/vips.sh
+RUN /tmp/buildpack/bin/compile /app /tmp/cache
+
+# Phase 3: Validate
+RUN test -f /app/.profile.d/vips.sh
+
+RUN . /app/.profile.d/vips.sh && vips --version
+
+RUN . /app/.profile.d/vips.sh && \
+    ! ldd /app/vendor/vips/lib/libvips.so | grep -q "not found"
+
+# Phase 4: Buildpack-specific tests (format support, HEIF, saver options, etc.)
+COPY --chown=appsdeck test/ /tmp/test/
+
+RUN . /app/.profile.d/vips.sh && \
+    ruby -I/tmp/test /tmp/test/vips_test.rb
+
+# Phase 5: Upstream image_processing gem test suite
+# Verifies our compiled vips passes the gem's own tests
+RUN git clone --quiet https://github.com/janko/image_processing.git /tmp/image_processing \
+    && cd /tmp/image_processing \
+    && git checkout --quiet "$(git describe --tags --abbrev=0)"
+
+RUN . /app/.profile.d/vips.sh && \
+    cd /tmp/image_processing && \
+    ruby -Ilib -Itest test/vips_test.rb test/pipeline_test.rb test/builder_test.rb
+
+# Phase 6: Multi-buildpack simulation
+# Verifies that the export file provides enough environment for a
+# subsequent buildpack to compile native extensions against libvips.
+RUN test -f /tmp/buildpack/export
+
+SHELL ["/bin/bash", "-c"]
+RUN . /tmp/buildpack/export && \
+    gem install ruby-vips --user-install --no-document && \
+    ruby -e "require 'vips'; puts \"ruby-vips #{Vips::VERSION} linked to libvips #{Vips.version_string}\""
