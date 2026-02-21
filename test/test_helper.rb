@@ -1,5 +1,3 @@
-ENV["VIPS_WARNING"] = "0"
-
 require "minitest/autorun"
 require "image_processing/vips"
 require "fileutils"

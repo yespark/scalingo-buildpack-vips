@@ -254,6 +254,106 @@ class VipsHeifTest < Minitest::Test
   end
 end
 
+class VipsActiveStorageVariantTest < Minitest::Test
+  # Mirrors what Active Storage does under the hood for:
+  #   has_one_attached :image do |attachable|
+  #     attachable.variant :large,  resize_to_fill: [756, 504], format: "jpg", quality: 80, strip: true
+  #     attachable.variant :medium, resize_to_fill: [558, 372], format: "jpg", quality: 80, strip: true
+  #     attachable.variant :small,  resize_to_fill: [405, 270], format: "jpg", quality: 80, strip: true
+  #   end
+
+  VARIANTS = {
+    large:  [756, 504],
+    medium: [558, 372],
+    small:  [405, 270],
+  }.freeze
+
+  def test_resize_to_fill_convert_quality_strip_pipeline
+    VARIANTS.each do |name, (width, height)|
+      process_to_file("variant_#{name}.jpg") do |path|
+        pipeline
+          .loader(page: 0)
+          .resize_to_fill(width, height)
+          .convert("jpg")
+          .saver(Q: 80, strip: true)
+          .call(destination: path)
+      end
+
+      result = Vips::Image.new_from_file(File.join(OUT_DIR, "variant_#{name}.jpg"))
+      assert_dimensions [width, height], result
+    end
+  end
+
+  def test_all_variant_sizes_from_same_source
+    sizes = VARIANTS.map do |name, (width, height)|
+      path = File.join(OUT_DIR, "multi_#{name}.jpg")
+      pipeline
+        .loader(page: 0)
+        .resize_to_fill(width, height)
+        .convert("jpg")
+        .saver(Q: 80, strip: true)
+        .call(destination: path)
+      File.size(path)
+    end
+
+    assert sizes[0] > sizes[1], "large variant should be bigger than medium"
+    assert sizes[1] > sizes[2], "medium variant should be bigger than small"
+  end
+
+  def test_strip_removes_metadata
+    with_meta = pipeline.convert("jpg").saver(Q: 80, strip: false).call
+    stripped  = pipeline.convert("jpg").saver(Q: 80, strip: true).call
+
+    img_with = Vips::Image.new_from_file(with_meta.path)
+    img_sans = Vips::Image.new_from_file(stripped.path)
+
+    # stripped file should have no EXIF or ICC profile fields
+    has_exif = img_sans.get_typeof("exif-data") != 0
+    has_icc  = img_sans.get_typeof("icc-profile-data") != 0
+    refute has_exif, "stripped image should not contain EXIF data"
+    refute has_icc, "stripped image should not contain ICC profile"
+  end
+
+  def test_png_alpha_to_jpg_via_resize_to_fill
+    # Active Storage doesn't flatten alpha — vips handles it by dropping the
+    # alpha channel on JPEG save. Verify this doesn't error or corrupt output.
+    process_to_file("alpha_to_jpg.jpg") do |path|
+      pipeline
+        .loader(page: 0)
+        .resize_to_fill(100, 100)
+        .convert("jpg")
+        .saver(Q: 80, strip: true)
+        .call(destination: path)
+    end
+
+    result = Vips::Image.new_from_file(File.join(OUT_DIR, "alpha_to_jpg.jpg"))
+    assert_dimensions [100, 100], result
+    assert_equal 3, result.bands, "JPEG should have 3 bands (no alpha)"
+  end
+
+  def test_loader_page_zero_on_raster_image
+    result = pipeline
+      .loader(page: 0)
+      .resize_to_fill(2, 2)
+      .call(save: false)
+    assert_dimensions [2, 2], result
+  end
+
+  def test_pdf_variant_pipeline
+    process_to_file("pdf_variant.jpg") do |path|
+      pipeline("test.pdf")
+        .loader(page: 0)
+        .resize_to_fill(405, 270)
+        .convert("jpg")
+        .saver(Q: 80, strip: true)
+        .call(destination: path)
+    end
+
+    result = Vips::Image.new_from_file(File.join(OUT_DIR, "pdf_variant.jpg"))
+    assert_dimensions [405, 270], result
+  end
+end
+
 class VipsPipelineTest < Minitest::Test
   def test_resize_then_convert_to_webp
     result = pipeline.resize_to_fit(8, 8).gaussblur(1.0).convert("webp").call
