@@ -59,9 +59,14 @@ RUN git clone --quiet https://github.com/janko/image_processing.git /tmp/image_p
     && cd /tmp/image_processing \
     && git checkout --quiet "$(git describe --tags --abbrev=0)"
 
+# image_processing 2.0 made mini_magick/ruby-vips soft deps and its test suite
+# loads `bundler/setup`, so install its Gemfile (into a user-writable path since
+# this runs as appsdeck) and run the tests through bundler.
 RUN . /app/.profile.d/vips.sh && \
     cd /tmp/image_processing && \
-    ruby -Ilib -Itest test/vips_test.rb test/pipeline_test.rb test/builder_test.rb
+    bundle config set --local path vendor/bundle && \
+    bundle install --quiet && \
+    bundle exec ruby -Ilib -Itest test/vips_test.rb test/pipeline_test.rb test/builder_test.rb
 
 # Phase 6: Multi-buildpack simulation
 # Verifies that the export file provides enough environment for a
