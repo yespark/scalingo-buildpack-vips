@@ -33,7 +33,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
       libimagequant-dev \
       liborc-0.4-dev \
       libheif-dev \
-      libheif-plugin-x265
+      libheif-plugin-x265 \
+      libheif-plugin-libde265
 
 ARG VIPS_VERSION=8.18.0
 ARG PREFIX=/opt/vips-build
