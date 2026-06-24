@@ -2,6 +2,13 @@ require "minitest/autorun"
 require "image_processing/vips"
 require "fileutils"
 
+# image_processing 2.0+ calls Vips.block_untrusted(true) on load, which blocks
+# libvips loaders flagged untrusted (SVG/rsvg, PDF/poppler, Magick). This
+# buildpack deliberately compiles those formats in, so we re-enable them to
+# verify the binary actually supports them. Apps that process SVG/PDF through
+# image_processing must do the same (Vips.block_untrusted(false)).
+Vips.block_untrusted(false) if Vips.respond_to?(:block_untrusted)
+
 class Minitest::Test
   FIXTURES = File.expand_path("fixtures", __dir__)
   OUT_DIR  = File.join(Dir.tmpdir, "vips_test_output")
