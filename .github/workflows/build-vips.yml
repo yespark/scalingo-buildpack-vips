@@ -3,6 +3,7 @@ name: Build and Release libvips
 on:
   schedule:
     - cron: '0 0 * * 0' # Run every Sunday at midnight
+  pull_request:
   workflow_dispatch:
     inputs:
       vips_version:
@@ -18,15 +19,13 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
+  resolve:
     runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      exists: ${{ steps.check_release.outputs.exists }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Determine vips version
         id: version
         run: |
@@ -58,6 +57,11 @@ jobs:
         run: |
           TAG="${{ steps.version.outputs.tag }}"
           OVERWRITE="${{ github.event.inputs.overwrite }}"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # A pull request never releases: it only has to prove both stacks build.
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if gh release view "$TAG" > /dev/null 2>&1; then
             if [ "$OVERWRITE" = "true" ]; then
               echo "Release ${TAG} exists — overwrite requested, deleting."
@@ -72,22 +76,79 @@ jobs:
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+
+  build:
+    needs: resolve
+    if: github.event_name == 'pull_request' || needs.resolve.outputs.exists == 'false'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: [scalingo-24, scalingo-26]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
 
       - name: Build and Test
-        if: steps.check_release.outputs.exists == 'false'
         run: |
           chmod +x build.sh
-          VIPS_VERSION="${{ steps.version.outputs.version }}" ./build.sh
+          STACK="${{ matrix.stack }}" VIPS_VERSION="${{ needs.resolve.outputs.version }}" ./build.sh
+
+      # The config log is the only place where a lost format loader shows up:
+      # a missing SVG or magick loader keeps the build green.
+      - name: Show enabled loaders
+        run: cat "build/configurations/${{ matrix.stack }}.config.log"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-${{ matrix.stack }}
+          path: |
+            build/${{ matrix.stack }}.tar.bz2
+            build/configurations/${{ matrix.stack }}.config.log
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: [resolve, build]
+    if: github.event_name != 'pull_request' && needs.resolve.outputs.exists == 'false'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download stack artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: build-*
+          merge-multiple: true
+          path: build
+
+      # Compatibility alias for buildpack refs older than the multi-stack split,
+      # whose bin/compile only knows the unsuffixed name (yespark-rails pins
+      # #v8.18.4). Drop it once every app pins a ref that resolves per stack.
+      - name: Add legacy scalingo-24 alias
+        run: cp build/scalingo-24.tar.bz2 build/scalingo.tar.bz2
 
       - name: Create GitHub Release
-        if: steps.check_release.outputs.exists == 'false'
         run: |
-          TAG="${{ steps.version.outputs.tag }}"
-          VERSION="${{ steps.version.outputs.version }}"
+          TAG="${{ needs.resolve.outputs.tag }}"
+          VERSION="${{ needs.resolve.outputs.version }}"
           gh release create "$TAG" \
-            --title "libvips ${VERSION} for scalingo-24" \
-            --notes "Pre-compiled libvips ${VERSION} for the scalingo-24 stack." \
+            --title "libvips ${VERSION} for scalingo-24 and scalingo-26" \
+            --notes "Pre-compiled libvips ${VERSION}.
+
+          - \`scalingo-24.tar.bz2\` — Ubuntu 24.04 stack
+          - \`scalingo-26.tar.bz2\` — Ubuntu 26.04 stack
+          - \`scalingo.tar.bz2\` — deprecated alias of the scalingo-24 tarball, kept for buildpack refs older than the multi-stack split
+
+          A tarball is tied to the stack it was built on: it only bundles the shared libraries missing from that base image." \
+            build/scalingo-24.tar.bz2 \
+            build/scalingo-26.tar.bz2 \
             build/scalingo.tar.bz2 \
-            build/configurations/scalingo.config.log
+            build/configurations/scalingo-24.config.log \
+            build/configurations/scalingo-26.config.log
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
