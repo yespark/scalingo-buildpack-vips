@@ -1,5 +1,9 @@
 # syntax=docker/dockerfile:1
-FROM scalingo/scalingo-24:latest
+
+# Target stack, mirrored from build.sh. Must match the tarball sitting in build/.
+ARG BASE_IMAGE=scalingo/scalingo-24:latest
+
+FROM ${BASE_IMAGE}
 
 # Phase 1: System setup (as root) — cached unless base image changes
 USER root
@@ -18,8 +22,9 @@ RUN gem install image_processing minitest-hooks minispec-metadata dhash-vips --n
 # Create cache directory (bin/compile expects $2)
 RUN mkdir -p /tmp/cache && chown appsdeck:appsdeck /tmp/cache
 
-# Set STACK so bin/detect works
-ENV STACK=scalingo-24
+# Set STACK so bin/detect works, and so bin/compile picks the matching tarball
+ARG STACK=scalingo-24
+ENV STACK=${STACK}
 # Disable ORC JIT — under QEMU emulation (ARM host → x86 guest) ORC's
 # runtime-generated SIMD code triggers "Illegal instruction" crashes.
 # The C fallback is functionally identical; production runs on native x86.
