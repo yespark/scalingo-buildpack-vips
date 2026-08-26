@@ -15,7 +15,6 @@ BIN_DIR=$(cd "$(dirname "$0")"; pwd)
 ROOT_DIR=$(dirname "$BIN_DIR")
 
 BUILDPACK_REPO="yespark/scalingo-buildpack-vips"
-ASSET_NAME="scalingo.tar.bz2"
 CURL_OPTS="--silent --show-error --fail --retry 3 --retry-connrefused --connect-timeout 10 -L"
 
 # Read VIPS_VERSION from ENV_DIR if available (allows version pinning via scalingo env)
@@ -26,16 +25,50 @@ fi
 indent() { sed -u 's/^/       /'; }
 arrow() { sed -u 's/^/-----> /'; }
 
+# Resolve the stack being deployed to. Scalingo exports $STACK during compile;
+# /etc/os-release covers the local Docker builds where it is not set.
+detect_stack() {
+  if [ -n "${STACK:-}" ]; then
+    echo "$STACK"
+    return 0
+  fi
+  # shellcheck disable=SC1091
+  . /etc/os-release
+  echo "scalingo-${VERSION_ID%%.*}"
+}
+
+STACK_NAME=$(detect_stack)
+ASSET_NAME="${STACK_NAME}.tar.bz2"
+
+# Asset name used before this buildpack became multi-stack. It has always been a
+# scalingo-24 build, so it is a valid fallback on that stack only — never on
+# scalingo-26, where those binaries cannot load.
+if [ "$STACK_NAME" = "scalingo-24" ]; then
+  FALLBACK_ASSET_NAME="scalingo.tar.bz2"
+else
+  FALLBACK_ASSET_NAME=""
+fi
+
+release_asset_url() {
+  local release_json="$1"
+  local name="$2"
+  echo "$release_json" | grep '"browser_download_url":' | grep -F "/${name}\"" \
+    | sed -E 's/.*"([^"]+)".*/\1/'
+}
+
 fetch_tarball() {
   local tarball_path="$1"
 
   # 1. Local tarball (used during Docker test builds)
-  local local_tarball="${ROOT_DIR}/build/${ASSET_NAME}"
-  if [ -f "$local_tarball" ]; then
-    echo "Using local tarball at ${local_tarball}" | indent
-    cp "$local_tarball" "$tarball_path"
-    return 0
-  fi
+  local local_tarball
+  for local_tarball in "${ROOT_DIR}/build/${ASSET_NAME}" \
+    ${FALLBACK_ASSET_NAME:+"${ROOT_DIR}/build/${FALLBACK_ASSET_NAME}"}; do
+    if [ -f "$local_tarball" ]; then
+      echo "Using local tarball at ${local_tarball}" | indent
+      cp "$local_tarball" "$tarball_path"
+      return 0
+    fi
+  done
 
   # 2. Query release from GitHub
   local api_url
@@ -59,11 +92,21 @@ fetch_tarball() {
 
   local tag
   tag=$(echo "$release_json" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+
+  local asset_name="$ASSET_NAME"
   local download_url
-  download_url=$(echo "$release_json" | grep '"browser_download_url":' | grep "$ASSET_NAME" | sed -E 's/.*"([^"]+)".*/\1/')
+  download_url=$(release_asset_url "$release_json" "$asset_name")
+
+  if [ -z "$download_url" ] && [ -n "$FALLBACK_ASSET_NAME" ]; then
+    echo "No ${asset_name} in release ${tag}, falling back to ${FALLBACK_ASSET_NAME}" | indent
+    asset_name="$FALLBACK_ASSET_NAME"
+    download_url=$(release_asset_url "$release_json" "$asset_name")
+  fi
 
   if [ -z "$download_url" ]; then
-    echo "Error: Could not find ${ASSET_NAME} in release ${tag}" | indent
+    echo "Error: release ${tag} ships no ${ASSET_NAME} for stack ${STACK_NAME}" | indent
+    echo "A tarball built on another stack is not usable here: it links against" | indent
+    echo "that stack's system libraries and libvips would fail to load at boot." | indent
     return 1
   fi
 
@@ -71,7 +114,7 @@ fetch_tarball() {
   source /etc/os-release
   local os_version="${ID}-${VERSION_ID}"
   local cache_dir="${CACHE_DIR}/${os_version}/vips"
-  local cached_tarball="${cache_dir}/${ASSET_NAME}"
+  local cached_tarball="${cache_dir}/${asset_name}"
   local cached_version="${cache_dir}/VERSION"
 
   if [ -f "$cached_tarball" ] && [ -f "$cached_version" ]; then
@@ -86,9 +129,9 @@ fetch_tarball() {
   fi
 
   # 4. Download from GitHub Releases
-  echo "Downloading ${ASSET_NAME} from release ${tag}..." | indent
+  echo "Downloading ${asset_name} from release ${tag}..." | indent
   curl $CURL_OPTS -o "$tarball_path" "$download_url" || {
-    echo "Error: Failed to download ${ASSET_NAME}" | indent
+    echo "Error: Failed to download ${asset_name}" | indent
     return 1
   }
 
@@ -102,9 +145,9 @@ fetch_tarball() {
 }
 
 if [ -n "$VIPS_VERSION" ]; then
-  echo "Vendoring libvips binaries (pinned to v${VIPS_VERSION})" | arrow
+  echo "Vendoring libvips binaries for ${STACK_NAME} (pinned to v${VIPS_VERSION})" | arrow
 else
-  echo "Vendoring libvips binaries (latest)" | arrow
+  echo "Vendoring libvips binaries for ${STACK_NAME} (latest)" | arrow
 fi
 
 VENDOR_DEST="$BUILD_DIR/vendor/vips"

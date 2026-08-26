@@ -5,10 +5,14 @@ if [ -n "${BUILDPACK_DEBUG:-}" ]; then
   set -x
 fi
 
-if [[ "${STACK:-}" == "scalingo-24" ]]; then
-  echo "vips"
-  exit 0
-else
-  echo "vips buildpack only supports scalingo-24" >&2
-  exit 1
-fi
+# One tarball is published per supported stack; anything else has no artifact.
+case "${STACK:-}" in
+  scalingo-24 | scalingo-26)
+    echo "vips"
+    exit 0
+    ;;
+  *)
+    echo "vips buildpack supports scalingo-24 and scalingo-26 (got '${STACK:-unset}')" >&2
+    exit 1
+    ;;
+esac
