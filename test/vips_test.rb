@@ -205,6 +205,17 @@ class VipsSaverTest < Minitest::Test
 end
 
 class VipsHeifTest < Minitest::Test
+  # Apps keep Vips.block_untrusted(true) (image_processing sets it on load):
+  # heifload must stay trusted, i.e. libvips built against libheif >= 1.23.2.
+  def test_heic_loads_with_untrusted_loaders_blocked
+    heic_path = File.join(OUT_DIR, "trusted.heic")
+    pipeline.convert("heic").call(destination: heic_path)
+    Vips.block_untrusted(true)
+    assert_equal 4, Vips::Image.new_from_file(heic_path).width
+  ensure
+    Vips.block_untrusted(false)
+  end
+
   def test_converts_png_to_heif
     process_to_file("converted.heif") do |path|
       pipeline.convert("heif").call(destination: path)

@@ -44,16 +44,39 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
       librsvg2-dev \
       libimagequant-dev \
       liborc-0.4-dev \
-      libheif-dev \
-      libheif-plugin-x265 \
-      libheif-plugin-libde265
+      cmake \
+      libde265-dev \
+      libx265-dev \
+      libaom-dev
 
 ARG VIPS_VERSION=8.18.0
+# libvips >= 8.18.6 tags heifload UNTRUSTED when built against libheif < 1.23.2
+# (critical CVEs), so Vips.block_untrusted(true) in image_processing stops HEIC
+# decoding. Ubuntu ships an older libheif: build it from source into $PREFIX.
+ARG LIBHEIF_VERSION=1.23.6
+ARG LIBHEIF_SHA256=4484346dc5995319dbc11e3a1c35d0a2ec46511ce370900869337fd2c7033125
 ARG PREFIX=/opt/vips-build
 # Names the exported artifact, so both stacks can live side by side in build/
 # and in a single GitHub release.
 ARG STACK=scalingo-24
 WORKDIR /usr/local/src
+
+# Build libheif with its HEVC/AV1 codecs as plugins (cached unless LIBHEIF_VERSION changes)
+RUN curl -sSLo libheif-${LIBHEIF_VERSION}.tar.gz https://github.com/strukturag/libheif/releases/download/v${LIBHEIF_VERSION}/libheif-${LIBHEIF_VERSION}.tar.gz \
+    && echo "${LIBHEIF_SHA256}  libheif-${LIBHEIF_VERSION}.tar.gz" | sha256sum -c - \
+    && tar xf libheif-${LIBHEIF_VERSION}.tar.gz \
+    && cmake -S libheif-${LIBHEIF_VERSION} -B libheif-build -G Ninja \
+       -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PREFIX -DCMAKE_INSTALL_LIBDIR=lib \
+       -DWITH_EXAMPLES=OFF -DBUILD_TESTING=OFF -DWITH_GDK_PIXBUF=OFF \
+       -DWITH_LIBDE265=ON -DWITH_LIBDE265_PLUGIN=ON \
+       -DWITH_X265=ON -DWITH_X265_PLUGIN=ON \
+       -DWITH_AOM_DECODER=ON -DWITH_AOM_DECODER_PLUGIN=ON \
+       -DWITH_AOM_ENCODER=ON -DWITH_AOM_ENCODER_PLUGIN=ON \
+    && cmake --build libheif-build \
+    && cmake --install libheif-build
+
+# meson must resolve libheif from $PREFIX, never from a -dev package of the base image
+ENV PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig
 
 # Download and extract source (cached unless VIPS_VERSION changes)
 RUN curl -sSLo vips-${VIPS_VERSION}.tar.xz https://github.com/libvips/libvips/releases/download/v${VIPS_VERSION}/vips-${VIPS_VERSION}.tar.xz \
@@ -83,7 +106,7 @@ RUN mkdir -p /export/configurations \
            grep -qxF "$soname" /tmp/base-libs.txt || { cp -L "$sopath" lib/ && cd lib && ldconfig -l "$soname" 2>/dev/null; cd ..; }; \
          done \
     # Bundle libheif plugins (dynamically loaded, not caught by ldd)
-    && cp -rL /usr/lib/x86_64-linux-gnu/libheif/plugins lib/heif-plugins \
+    && mv lib/libheif/plugins lib/heif-plugins \
     && for plugin in lib/heif-plugins/*.so; do \
          ldd "$plugin" | awk '/=>/ && $3 != "" {print $3}' \
          | while read -r sopath; do \
@@ -96,6 +119,7 @@ RUN mkdir -p /export/configurations \
     && tar cjf "/export/${STACK}.tar.bz2" bin include lib \
     && echo "vips --vips-version" > "/export/configurations/${STACK}.config.log" \
     && $PREFIX/bin/vips --vips-version >> "/export/configurations/${STACK}.config.log" \
+    && echo "libheif $(pkg-config --modversion libheif)" >> "/export/configurations/${STACK}.config.log" \
     && printf '\nvips --vips-config\n' >> "/export/configurations/${STACK}.config.log" \
     && $PREFIX/bin/vips --vips-config >> "/export/configurations/${STACK}.config.log"
 
