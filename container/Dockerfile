@@ -26,6 +26,9 @@ COPY --from=base-snapshot /tmp/base-libs.txt /tmp/base-libs.txt
 # librsvg2-dev matters on scalingo-26 only: Ubuntu 24.04 ships librsvg on the
 # base image, Ubuntu 26.04 does not. Without it meson silently disables the SVG
 # loader — the build stays green and SVG support disappears from the tarball.
+#
+# aom-tools is build-only: on 26.04 the AOM CMake config imports /usr/bin/aomdec,
+# and libheif's configure step aborts when that file is missing.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     mkdir -p /var/log/apt && \
@@ -47,7 +50,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
       cmake \
       libde265-dev \
       libx265-dev \
-      libaom-dev
+      libaom-dev \
+      aom-tools
 
 ARG VIPS_VERSION=8.18.0
 # libvips >= 8.18.6 tags heifload UNTRUSTED when built against libheif < 1.23.2
