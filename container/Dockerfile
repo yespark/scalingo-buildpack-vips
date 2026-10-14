@@ -106,7 +106,7 @@ RUN mkdir -p /export/configurations \
            grep -qxF "$soname" /tmp/base-libs.txt || { cp -L "$sopath" lib/ && cd lib && ldconfig -l "$soname" 2>/dev/null; cd ..; }; \
          done \
     # Bundle libheif plugins (dynamically loaded, not caught by ldd)
-    && mv lib/libheif/plugins lib/heif-plugins \
+    && mv lib/libheif lib/heif-plugins \
     && for plugin in lib/heif-plugins/*.so; do \
          ldd "$plugin" | awk '/=>/ && $3 != "" {print $3}' \
          | while read -r sopath; do \
