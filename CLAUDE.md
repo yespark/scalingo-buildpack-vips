@@ -59,6 +59,7 @@ The target image comes from the `BASE_IMAGE` build arg (`scalingo/<stack>:latest
 * Uses `--mount=type=cache` for `apt` packages to speed up rebuilds.
 * Installs build tools (`meson`, `ninja`, `pkg-config`) and system headers for libraries already present on the Scalingo stack (glib, webp, jpeg, tiff, etc.).
 * Compiles libvips into a clean, isolated prefix (`/opt/vips-build`).
+* Builds **libheif** from source (`LIBHEIF_VERSION`, checksum-pinned) into the same prefix, with its libde265/x265/aom codecs as plugins. Ubuntu's libheif is older than 1.23.2, and libvips >= 8.18.6 then tags `heifload` untrusted: with `Vips.block_untrusted(true)` (image_processing's default) HEIC stops loading. Bump it with the CVE feed, never back to apt.
 * Strips symbols from binaries to reduce slug size.
 * **Bundles runtime shared libraries**: Uses `ldd` on `libvips.so` and diffs the results against the base-snapshot to copy any shared libraries that aren't on the base image (e.g., poppler, orc, openjp2) into the prefix's `lib/` directory. This makes the tarball self-contained — no extra `apt-get install` is needed at deploy time.
 
